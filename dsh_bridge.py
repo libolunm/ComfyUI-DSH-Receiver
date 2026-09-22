@@ -94,6 +94,15 @@ class DshWebClient:
         value = self.rpc("session/list", {"_request": {}})
         return (value or {}).get("items") or []
 
+    def create_session(self, cwd: str = "", agent_preset: str = "") -> dict:
+        """Create a fresh (blank) session. Returns {"sessionId": ...}."""
+        req = {}
+        if cwd:
+            req["cwd"] = cwd
+        if agent_preset:
+            req["agentPreset"] = agent_preset
+        return self.rpc("session/create", {"request": req}) or {}
+
     def pick_session(self, session_id: str = "") -> dict:
         """Explicit id wins; otherwise newest non-blank session."""
         items = self.list_sessions()

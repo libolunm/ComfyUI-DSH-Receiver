@@ -44,6 +44,22 @@
 .dsh-dot[data-kind="err"]  { background: #d9574f; }
 .dsh-dot[data-kind="warn"] { background: #e0a13c; }
 
+.dsh-new {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #2a2e38;
+  color: #c8ccd4;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.dsh-new:hover:not(:disabled) { background: #3f6fd8; color: #fff; border-color: transparent; }
+.dsh-new:disabled { opacity: 0.5; cursor: default; }
+
 .dsh-reply {
   height: 170px;
   overflow-y: auto;

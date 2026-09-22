@@ -94,6 +94,7 @@ function buildPanel(node) {
       <select class="dsh-session" title="目标会话">
         <option value="">自动（最新会话）</option>
       </select>
+      <button class="dsh-new" title="新建 dsh 对话（上下文干净了，提示词更准）">＋</button>
       <span class="dsh-dot" title="状态"></span>
     </div>
     <div class="dsh-reply" data-empty="true">还没有对话。在下方输入，点「发送」。</div>
@@ -115,6 +116,7 @@ function buildPanel(node) {
   const input = root.querySelector(".dsh-input");
   const sendBtn = root.querySelector(".dsh-send");
   const readBtn = root.querySelector(".dsh-read");
+  const newBtn = root.querySelector(".dsh-new");
   const status = root.querySelector(".dsh-status");
 
   node._dshPanel = { sel, dot, replyBox, valueBox, input, status };
@@ -128,6 +130,7 @@ function buildPanel(node) {
   const setBusy = (busy, text) => {
     sendBtn.disabled = busy;
     readBtn.disabled = busy;
+    newBtn.disabled = busy;
     if (busy) setStatus(text || "等待 dsh 回复…", "busy");
   };
   const extractArgs = () => ({
@@ -216,17 +219,45 @@ function buildPanel(node) {
   });
 
   // session list (async, best-effort)
+  const loadSessions = async (selectId) => {
+    const res = await api("sessions");
+    if (!res.ok) throw new Error(res.error);
+    sel.innerHTML = '<option value="">自动（最新会话）</option>';
+    for (const s of res.sessions) {
+      const opt = document.createElement("option");
+      opt.value = s.id;
+      opt.textContent = (s.running ? "▶ " : "") + (s.blank ? "＋ " : "") + s.title;
+      sel.appendChild(opt);
+    }
+    sel.value = selectId || wSession?.value || "";
+  };
+
+  newBtn.addEventListener("click", async () => {
+    setBusy(true, "创建新对话…");
+    try {
+      const res = await api("new_session", { session_id: wSession?.value || "" });
+      if (!res.ok) throw new Error(res.error || "未知错误");
+      await loadSessions(res.session_id);
+      if (wSession) wSession.value = res.session_id;
+      // fresh conversation = fresh panel state
+      replyBox.dataset.empty = "true";
+      replyBox.textContent = "新对话已建好。直接输入，点「发送」。";
+      valueBox.textContent = "—";
+      valueBox.dataset.hit = "false";
+      for (const wx of [wLastMsg, wLastValue, wLastReply]) { if (wx) wx.value = ""; }
+      if (wLastSession) wLastSession.value = res.session_id;
+      setStatus("新对话 " + res.session_id.slice(0, 16) + "…", "ok");
+      node.setDirtyCanvas(true, true);
+    } catch (err) {
+      setStatus("创建失败：" + err.message, "err");
+    } finally {
+      setBusy(false);
+    }
+  });
+
   (async () => {
     try {
-      const res = await api("sessions");
-      if (!res.ok) throw new Error(res.error);
-      for (const s of res.sessions) {
-        const opt = document.createElement("option");
-        opt.value = s.id;
-        opt.textContent = (s.running ? "▶ " : "") + s.title;
-        sel.appendChild(opt);
-      }
-      if (wSession?.value) sel.value = wSession.value;
+      await loadSessions();
       setStatus("", "");
     } catch (err) {
       setStatus("dsh 未连接：" + err.message, "err");

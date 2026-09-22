@@ -14,6 +14,7 @@ DSH Latest Reply    : 只输出最新回复原文
 from __future__ import annotations
 
 import asyncio
+import json
 
 from .dsh_reader import (
     default_sessions_root,
@@ -45,13 +46,24 @@ def _session_title(item: dict) -> str:
         return ""
 
 
+def _wait_session_file(sid: str, timeout: float = 10.0) -> str:
+    """Fresh sessions flush their log slightly after creation — poll briefly."""
+    import time
+    deadline = time.time() + timeout
+    path = find_session_file(sid)
+    while not path and time.time() < deadline:
+        time.sleep(0.5)
+        path = find_session_file(sid)
+    return path
+
+
 def do_talk(message: str, session_id: str = "", timeout: float = 120.0,
             include_reasoning: bool = False) -> dict:
     """Send one message and block until dsh finishes that turn."""
     client = DshWebClient()
     target = client.pick_session(session_id or "")
     sid = target.get("sessionId") or ""
-    log_path = find_session_file(sid)
+    log_path = _wait_session_file(sid)
     if not log_path:
         raise RuntimeError("dsh talk: 找不到会话日志 %s" % sid)
     request_id = client.send_prompt(sid, message)
@@ -76,6 +88,38 @@ def do_read_latest(session_id: str = "", include_reasoning: bool = False) -> dic
         raise RuntimeError("dsh read: 找不到会话日志 %s" % sid)
     reply = latest_reply(log_path, include_reasoning)
     return {"reply": reply, "session_id": sid, "title": _session_title(target)}
+
+
+def _session_cwd(log_path: str) -> str:
+    """cwd recorded in the session log header (first line)."""
+    try:
+        from .dsh_reader import read_log_text
+        first = read_log_text(log_path).splitlines()[0]
+        return str(json.loads(first).get("cwd") or "")
+    except Exception:
+        return ""
+
+
+def do_new_session(base_session_id: str = "") -> dict:
+    """Create a fresh blank dsh session (clean context for prompt talk).
+
+    Inherits cwd from the base session (explicit or latest non-blank) so the
+    new session lands in the same project instead of the dsh default cwd.
+    """
+    client = DshWebClient()
+    cwd = ""
+    try:
+        base = client.pick_session(base_session_id or "")
+        log_path = find_session_file(base.get("sessionId") or "")
+        if log_path:
+            cwd = _session_cwd(log_path)
+    except Exception:
+        pass  # cwd inheritance is best-effort
+    value = client.create_session(cwd=cwd)
+    sid = value.get("sessionId") or ""
+    if not sid:
+        raise RuntimeError("dsh new session: session/create 没返回 sessionId: %r" % value)
+    return {"session_id": sid, "cwd": cwd}
 
 
 # common wrapper pairs dsh tends to use; tried in order when the configured
@@ -181,6 +225,19 @@ try:
                 int(data.get("match_index") or 0),
             )
             return _web.json_response({"ok": True, **result, **ext})
+        except Exception as exc:
+            return _json_error(exc)
+
+    @_routes.post("/dsh/api/new_session")
+    async def dsh_api_new_session(request):
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: do_new_session(data.get("session_id") or ""))
+            return _web.json_response({"ok": True, **result})
         except Exception as exc:
             return _json_error(exc)
 
